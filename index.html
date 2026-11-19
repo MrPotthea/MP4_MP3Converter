@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MP4 to MP3 Converter</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1c2430;--muted:#667085;--line:#d9dee7;--accent:#1f6feb;--accent-t:#fff;--ok:#157f3b;--err:#c0392b}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14171c;--card:#1d222a;--text:#e8ecf2;--muted:#9aa5b5;--line:#313845;--accent:#4c8dff;--accent-t:#fff;--ok:#4cc27a;--err:#ff7b6b}}
+:root[data-theme="dark"]{--bg:#14171c;--card:#1d222a;--text:#e8ecf2;--muted:#9aa5b5;--line:#313845;--accent:#4c8dff;--accent-t:#fff;--ok:#4cc27a;--err:#ff7b6b}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,"Noto Sans Khmer",sans-serif;line-height:1.5;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+main{max-width:760px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:22px;margin:0 0 4px}
+p.sub{margin:0 0 16px;color:var(--muted);font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:28px 12px;text-align:center;cursor:pointer;color:var(--muted)}
+.drop.over{border-color:var(--accent);color:var(--accent)}
+.drop b{color:var(--text);display:block;font-size:16px;margin-bottom:4px}
+button{font:inherit;border:0;border-radius:8px;padding:10px 16px;background:var(--accent);color:var(--accent-t);cursor:pointer;font-weight:bold}
+button.sec{background:transparent;color:var(--text);border:1px solid var(--line);font-weight:normal}
+button:disabled{opacity:.45;cursor:not-allowed}
+label{display:flex;gap:8px;align-items:center;font-size:14px;margin:8px 0;flex-wrap:wrap}
+select{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--text)}
+.item{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+.item:last-child{border-bottom:0}
+.top{display:flex;align-items:center;gap:10px}
+.nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sz{color:var(--muted);white-space:nowrap}
+.bar{height:6px;border-radius:3px;background:var(--line);margin-top:6px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent)}
+.x{background:none;border:0;color:var(--muted);padding:0 6px;font-size:16px}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.msg{font-size:14px;margin-top:10px}
+.ok{color:var(--ok)}.err{color:var(--err)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>MP4 to MP3 Converter · ឧបករណ៍បម្លែង MP4 ទៅ MP3</h1>
+  <p class="sub">Extract the audio from video files (MP4, MOV, WebM, M4A, WAV, OGG) as MP3. Everything runs in your browser; nothing is uploaded. · ទាញយកសំឡេងពីវីដេអូ។</p>
+
+  <div class="card">
+    <div class="drop" id="drop">
+      <b>Click or drop files here · ចុច ឬអូសឯកសារមកទីនេះ</b>
+      Select several at once
+    </div>
+    <input type="file" id="file" multiple accept="video/*,audio/*,.mp4,.m4a,.mov,.webm,.mkv,.wav,.ogg" hidden>
+  </div>
+
+  <div class="card" id="listCard" hidden><div id="list"></div></div>
+
+  <div class="card" id="optCard" hidden>
+    <label>Quality (bitrate) · គុណភាព
+      <select id="kbps">
+        <option value="64">64 kbps (small, voice)</option>
+        <option value="96">96 kbps</option>
+        <option value="128" selected>128 kbps (standard)</option>
+        <option value="192">192 kbps (good)</option>
+        <option value="256">256 kbps</option>
+        <option value="320">320 kbps (best)</option>
+      </select>
+    </label>
+    <label>Channels · ឆានែល
+      <select id="ch">
+        <option value="auto" selected>Same as source</option>
+        <option value="1">Mono (smaller file)</option>
+      </select>
+    </label>
+    <div class="row">
+      <button id="go">Convert &amp; download MP3</button>
+      <button class="sec" id="clear">Clear</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+</main>
+
+<script>
+(function(){
+  var items=[]; // {file,bar,note}
+  var $=function(id){return document.getElementById(id)};
+  var drop=$('drop'), input=$('file');
+  var downloads=null;
+  try{ if(window.claude&&claude.use){ claude.use('downloads').then(function(d){downloads=d||null}).catch(function(){}) } }catch(e){}
+
+  function say(t,c){var m=$('msg');m.textContent=t;m.className='msg '+(c||'')}
+  function mb(n){return n>=1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB'}
+
+  drop.addEventListener('click',function(){input.click()});
+  input.addEventListener('change',function(){add(input.files);input.value=''});
+  ['dragover','dragenter'].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.add('over')})});
+  ['dragleave','drop'].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.remove('over')})});
+  drop.addEventListener('drop',function(ev){add(ev.dataTransfer.files)});
+
+  function add(list){
+    Array.prototype.slice.call(list).forEach(function(f){
+      if(!items.some(function(x){return x.file.name===f.name&&x.file.size===f.size}))items.push({file:f});
+    });
+    render();say('');
+  }
+
+  function render(){
+    var box=$('list');box.textContent='';
+    items.forEach(function(it,i){
+      var d=document.createElement('div');d.className='item';
+      var t=document.createElement('div');t.className='top';
+      var n=document.createElement('span');n.className='nm';n.textContent=it.file.name;
+      var s=document.createElement('span');s.className='sz';s.textContent=mb(it.file.size);
+      var b=document.createElement('button');b.className='x';b.textContent='✕';b.title='Remove';
+      b.onclick=function(){items.splice(i,1);render()};
+      t.appendChild(n);t.appendChild(s);t.appendChild(b);
+      var bar=document.createElement('div');bar.className='bar';
+      var fill=document.createElement('i');bar.appendChild(fill);
+      it.bar=fill;
+      d.appendChild(t);d.appendChild(bar);box.appendChild(d);
+    });
+    $('listCard').hidden=$('optCard').hidden=!items.length;
+  }
+  $('clear').onclick=function(){items=[];render();say('')};
+
+  var OK_RATES=[8000,11025,12000,16000,22050,24000,32000,44100,48000];
+  async function decode(file){
+    var ab=await file.arrayBuffer();
+    var AC=window.AudioContext||window.webkitAudioContext;
+    var ctx=new AC();
+    var buf;
+    try{
+      buf=await new Promise(function(res,rej){ctx.decodeAudioData(ab,res,rej)});
+    }finally{try{ctx.close()}catch(e){}}
+    if(OK_RATES.indexOf(buf.sampleRate)<0){
+      var len=Math.ceil(buf.duration*44100);
+      var oc=new OfflineAudioContext(buf.numberOfChannels,len,44100);
+      var src=oc.createBufferSource();src.buffer=buf;src.connect(oc.destination);src.start();
+      buf=await oc.startRendering();
+    }
+    return buf;
+  }
+
+  function toInt16(f){
+    var o=new Int16Array(f.length);
+    for(var i=0;i<f.length;i++){var v=Math.max(-1,Math.min(1,f[i]));o[i]=v<0?v*32768:v*32767}
+    return o;
+  }
+
+  async function encode(buf,kbps,mono,onProg){
+    var nch=(mono||buf.numberOfChannels<2)?1:2;
+    var enc=new lamejs.Mp3Encoder(nch,buf.sampleRate,kbps);
+    var L=buf.getChannelData(0),R=buf.numberOfChannels>1?buf.getChannelData(1):L;
+    if(mono&&buf.numberOfChannels>1){
+      var m=new Float32Array(L.length);
+      for(var j=0;j<m.length;j++)m[j]=(L[j]+R[j])/2;
+      L=m;
+    }
+    var li=toInt16(L),ri=nch===2?toInt16(R):null;
+    var parts=[],step=1152*20,last=0;
+    for(var i=0;i<li.length;i+=step){
+      var a=li.subarray(i,i+step);
+      var out=nch===2?enc.encodeBuffer(a,ri.subarray(i,i+step)):enc.encodeBuffer(a);
+      if(out.length)parts.push(new Uint8Array(out));
+      var now=Date.now();
+      if(now-last>50){onProg(i/li.length);last=now;await new Promise(function(r){setTimeout(r,0)})}
+    }
+    var end=enc.flush();
+    if(end.length)parts.push(new Uint8Array(end));
+    onProg(1);
+    return new Blob(parts,{type:'audio/mpeg'});
+  }
+
+  function save(blob,name){
+    if(downloads)return downloads.save({filename:name,data:blob});
+    return new Promise(function(res){
+      var u=URL.createObjectURL(blob),a=document.createElement('a');
+      a.href=u;a.download=name;document.body.appendChild(a);a.click();
+      setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(u)},100);
+      res();
+    });
+  }
+
+  $('go').onclick=async function(){
+    if(!items.length)return;
+    var kbps=+$('kbps').value,mono=$('ch').value==='1';
+    var btn=$('go');btn.disabled=true;
+    var out=[],used={},fail=[];
+    for(var i=0;i<items.length;i++){
+      var it=items[i];it.bar.style.width='0';
+      say('Converting '+(i+1)+' of '+items.length+': '+it.file.name+' …');
+      try{
+        var buf=await decode(it.file);
+        var blob=await encode(buf,kbps,mono,function(p){it.bar.style.width=Math.round(p*100)+'%'});
+        var base=it.file.name.replace(/\.[^.]+$/,'')||'audio',nm=base+'.mp3';
+        if(used[nm]){nm=base+'-'+(++used[nm])+'.mp3'}else used[nm]=1;
+        out.push({name:nm,blob:blob});
+      }catch(e){fail.push(it.file.name)}
+    }
+    try{
+      if(!out.length){say('Could not read the audio in: '+fail.join(', ')+'. Try Chrome, Edge or Safari, or another file.','err')}
+      else{
+        // The hosted page can't save .mp3 directly, so MP3s go inside a .zip there.
+        var zip=out.length>1||downloads;
+        var note=fail.length?' Skipped: '+fail.join(', ')+'.':'';
+        if(zip){
+          var z=new JSZip();out.forEach(function(o){z.file(o.name,o.blob)});
+          var zb=await z.generateAsync({type:'blob'});
+          await save(zb,'converted-mp3.zip');
+          say('Done: '+out.length+' file(s) saved as converted-mp3.zip. Unzip to get your MP3.'+note,'ok');
+        }else{
+          await save(out[0].blob,out[0].name);
+          say('Done: '+out[0].name+' ('+mb(out[0].blob.size)+').'+note,'ok');
+        }
+      }
+    }catch(e){
+      if(e&&e.code==='declined')say('Download cancelled. Click again to save.','err');
+      else say('Could not save: '+((e&&e.message)||'unknown error'),'err');
+    }
+    btn.disabled=false;
+  };
+})();
+</script>
+</body>
+</html>
